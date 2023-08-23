@@ -39,6 +39,10 @@ function Precache()
 	fixup_origin <- Vector();
 	fixup_angles <- QAngle();
 	
+    // unused spawnflags are used to define vehicle type
+    local flags = NetProps.GetPropInt(self, "m_spawnflags");
+    NetProps.SetPropInt(self, "m_nVehicleType", flags);
+	
 	NetProps.SetPropInt(self, "m_spawnflags", 1); // per-frame physics must be on
 }
 

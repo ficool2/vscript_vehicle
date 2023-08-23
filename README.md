@@ -5,6 +5,7 @@ This is *not* func_vehicle!
 # Usage
 Create a `prop_vehicle_driveable` entity and set up its model and vehicle script file as usual.
 In the `Entity Scripts` section, assign the `vehicle.nut` script. This script must be assigned to all vehicles.
+If your vehicle behaves like an Airboat, you will need to set `spawnflags` to 8 or the physics will glitch out. This can be done by turning off SmartEdit in Hammer.
  
 Finally, create a `logic_script` and assign it the `vehicle_events.nut` file. Everything will now work.
 
