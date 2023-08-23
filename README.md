@@ -8,6 +8,8 @@ In the `Entity Scripts` section, assign the `vehicle.nut` script. This script mu
  
 Finally, create a `logic_script` and assign it the `vehicle_events.nut` file. Everything will now work.
 
+**NOTE**: If using HL2 vehicles such as buggy or airboat, you must add the contents of `scripts/game_sounds_vehicle.txt` (located in `hl2/hl2_misc.vpk`) to your `maps/<map_name>_level_sounds.txt` for sounds to work.
+
 **NOTE**: `vehicle_events.nut` setups required event listeners for vehicles and adds a think function to the player.
 If your map uses scripts with their own events and clears them, or adds a custom think function to the player, you will need to modify `vehicle_events.nut` for compatibility.
 The following sources of compatibility need to be considered:
