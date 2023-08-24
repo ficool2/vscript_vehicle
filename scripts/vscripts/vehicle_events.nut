@@ -37,7 +37,10 @@ ClearGameEventCallbacks();
 function OnGameEvent_player_spawn(params)
 {
 	Vehicle_OnPlayerSpawn(params);
-	AddThinkToEnt(player, "PlayerThink");
+	
+	local player = GetPlayerFromUserID(params.userid);
+	if (player)
+		AddThinkToEnt(player, "PlayerThink");
 }
 
 function OnGameEvent_player_death(params)
