@@ -24,7 +24,7 @@ const MASK_PLAYERSOLID = 33636363; // CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_
 const DMG_VEHICLE = 16;
 
 // This hack allows vehicle damage to show the train kil licon
-if (!("VehicleDmgOwner" in getroottable()) || !VehicleDmgOwner.IsValid());
+if (!("VehicleDmgOwner" in getroottable()) || !VehicleDmgOwner.IsValid())
 {
 	::VehicleDmgOwner <- SpawnEntityFromTable("handle_dummy", {});
 	VehicleDmgOwner.KeyValueFromString("classname", "vehicle");
