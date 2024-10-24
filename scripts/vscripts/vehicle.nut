@@ -7,21 +7,54 @@ const IN_BACK = 16;
 const IN_USE = 32;
 const IN_MOVELEFT = 512;
 const IN_MOVERIGHT = 1024;
-
 const DMG_CRUSH = 1;
-
 const COLLISION_GROUP_PLAYER = 5;
 const COLLISION_GROUP_IN_VEHICLE = 10;
-
 const MOVETYPE_NONE = 0;
 const MOVETYPE_WALK = 2;
-
-const EFL_KILLME = 1;
+const FL_DUCKING = 2;
 const EFL_IS_BEING_LIFTED_BY_BARNACLE = 1048576;
-
 const MASK_PLAYERSOLID = 33636363; // CONTENTS_SOLID|CONTENTS_MOVEABLE|CONTENTS_WINDOW|CONTENTS_PLAYERCLIP|CONTENTS_GRATE|CONTENTS_MONSTER
-
 const DMG_VEHICLE = 16;
+
+::VehicleInitPlayer <- function(player)
+{
+	player.ValidateScriptScope();
+	local scope = player.GetScriptScope();
+	scope.vehicle <- null;
+	scope.vehicle_scope <- null;
+}
+
+::VehicleThink <- function()
+{
+	for (local player; player = Entities.FindByClassname(player, "player");)
+	{
+		if (!player.IsAlive())
+			continue;
+		local scope = player.GetScriptScope();
+		if (scope.vehicle)
+		{
+			NetProps.SetPropInt(player, "m_Shared.m_nAirDucked", 8);
+			continue;
+		}
+		local buttons = NetProps.GetPropInt(player, "m_nButtons");		
+		if ((buttons & IN_USE) || player.IsUsingActionSlot())
+		{	
+			// find vehicle under crosshair
+			local eye_pos = player.EyePosition();
+			local trace =
+			{
+				start = eye_pos,
+				end = eye_pos + player.EyeAngles().Forward() * 192.0,
+				ignore = player
+			}
+			TraceLineEx(trace);		
+			if (trace.hit && trace.enthit.GetClassname() == "prop_vehicle_driveable")
+				trace.enthit.GetScriptScope().Enter(player);
+		}
+	}
+	return 0.1
+}
 
 // This hack allows vehicle damage to show the train kil licon
 if (!("VehicleDmgOwner" in getroottable()) || !VehicleDmgOwner.IsValid())
@@ -29,6 +62,7 @@ if (!("VehicleDmgOwner" in getroottable()) || !VehicleDmgOwner.IsValid())
 	::VehicleDmgOwner <- SpawnEntityFromTable("handle_dummy", {});
 	VehicleDmgOwner.KeyValueFromString("classname", "vehicle");
 }
+AddThinkToEnt(VehicleDmgOwner, "VehicleThink")
 
 function Precache()
 {
@@ -93,8 +127,8 @@ function CheckExitPoint(yaw, distance, mins, maxs)
 
 function CanExit()
 {
-	local mins = activator.GetPlayerMins();
-	local maxs = activator.GetPlayerMaxs();
+	local mins = driver.GetPlayerMins();
+	local maxs = driver.GetPlayerMaxs();
 	
 	local attachment = vehicle.LookupAttachment("vehicle_driver_exit");
 	if (attachment > 0)
@@ -150,47 +184,6 @@ function CanExit()
 	return false;
 }
 
-function FixupDriverEntry()
-{
-	if (!activator)
-		return;
-		
-	local origin;
-	local attachment = vehicle.LookupAttachment("vehicle_driver_eyes");
-	if (attachment > 0)
-		origin = vehicle.GetAttachmentOrigin(attachment);
-	else
-		origin = vehicle.GetCenter();
-
-	origin.z -= 64.0;
-	
-	activator.SetAbsOrigin(origin);
-}
-
-function FixupDriverExit()
-{
-	if (!activator)
-		return;
-
-	fixup_origin = activator.GetOrigin() + Vector(0, 0, 8);
-	fixup_angles = activator.EyeAngles();				
-
-	if (!CanExit())
-	{
-		// too bad
-		//printl("Can't exit!");
-	}
-		
-	fixup_angles.z = 0.0; // no roll
-	
-	activator.SetCollisionGroup(COLLISION_GROUP_PLAYER);
-	activator.SetMoveType(MOVETYPE_WALK, 0);
-
-	activator.SetAbsOrigin(fixup_origin);
-	activator.SnapEyeAngles(fixup_angles);
-	activator.SetAbsVelocity(vehicle.GetPhysVelocity());
-}
-
 function Enter(player)
 {
 	if (!can_enter || driver)
@@ -205,18 +198,28 @@ function Enter(player)
 	driver.SetCollisionGroup(COLLISION_GROUP_IN_VEHICLE);
 	driver.SetMoveType(MOVETYPE_NONE, 0);
 	
+	local origin;
+	local attachment = vehicle.LookupAttachment("vehicle_driver_eyes");
+	if (attachment > 0)
+		origin = vehicle.GetAttachmentOrigin(attachment);
+	else
+		origin = vehicle.GetCenter();
+	origin.z -= 64.0;
+	driver.SetAbsOrigin(origin);
 	driver.SetAbsVelocity(Vector());
-	EntFireByHandle(vehicle, "CallScriptFunction", "FixupDriverEntry", -1, driver, null);
-	EntFireByHandle(driver, "SetParent", "!activator", -1, vehicle, null);
 	
+	driver.AcceptInput("SetParent", "!activator", vehicle, vehicle);
+	
+	driver.RemoveFlag(FL_DUCKING);
 	NetProps.SetPropBool(driver, "m_Local.m_bDrawViewmodel", false);
-
+	NetProps.SetPropInt(driver, "m_Shared.m_nAirDucked", 8);
+	
 	NetProps.SetPropBool(driver, "pl.deadflag", true);
 	driver.AddCustomAttribute("disable weapon switch", 1, -1);
 	driver.AddCustomAttribute("no_attack", 1, -1);
 	driver.AddCustomAttribute("no_duck", 1, -1);
 		
-	EntFireByHandle(vehicle, "TurnOn", "", -1, null, null);
+	vehicle.AcceptInput("TurnOn", "", null, null)
 	EntFireByHandle(vehicle, "CallScriptFunction", "EnableExit", 1.0, null, null);
 }
 
@@ -230,8 +233,25 @@ function Exit(dead, teleport)
 		driver.RemoveCustomAttribute("no_attack");
 		driver.RemoveCustomAttribute("no_duck");
 		
-		EntFireByHandle(driver, "ClearParent", "", -1, null, null);
-		EntFireByHandle(vehicle, "CallScriptFunction", "FixupDriverExit", -1, driver, null);
+		driver.AcceptInput("ClearParent", "", null, null)
+		
+		fixup_origin = driver.GetOrigin() + Vector(0, 0, 8);
+		fixup_angles = driver.EyeAngles();				
+	
+		if (!CanExit())
+		{
+			// too bad
+			//printl("Can't exit!");
+		}
+			
+		fixup_angles.z = 0.0; // no roll
+		
+		driver.SetCollisionGroup(COLLISION_GROUP_PLAYER);
+		driver.SetMoveType(MOVETYPE_WALK, 0);
+	
+		driver.SetAbsOrigin(fixup_origin);
+		driver.SnapEyeAngles(fixup_angles);
+		driver.SetAbsVelocity(vehicle.GetPhysVelocity());		
 
 		NetProps.SetPropBool(driver, "m_Local.m_bDrawViewmodel", true);
 		
@@ -251,7 +271,7 @@ function Exit(dead, teleport)
 	
 	NetProps.SetPropFloat(vehicle, "m_VehiclePhysics.m_controls.steering", 0);
 	NetProps.SetPropFloat(vehicle, "m_VehiclePhysics.m_controls.throttle", 0);
-	//EntFireByHandle(vehicle, "TurnOff", "", -1, null, null); // this breaks the vehicle permanently for some reason
+	//vehicle.AcceptInput("TurnOff", "", null, null); // this breaks the vehicle permanently for some reason
 	
 	can_enter = false;
 	EntFireByHandle(vehicle, "CallScriptFunction", "EnableEnter", 1.0, null, null);
@@ -282,7 +302,7 @@ function Think()
 		
 		if (can_exit)
 		{
-			if ((buttons & IN_USE) || NetProps.GetPropBool(driver, "m_bUsingActionSlot"))
+			if ((buttons & IN_USE) || driver.IsUsingActionSlot())
 				Exit(false, true);
 		}
 			
@@ -294,100 +314,102 @@ function Think()
 	}
 }
 
-// events
-
-::Vehicle_OnPlayerSpawn <- function(params)
+if (!("VehicleEvents" in getroottable()))
+	::VehicleEvents <- {};
+::VehicleEvents.clear();
+::VehicleEvents =
 {
-	local player = GetPlayerFromUserID(params.userid);
-	if (!player)
-		return;
-		
-	player.RemoveEFlags(EFL_KILLME); // added if inside a vehicle on round end
-		
-	if (params.team == 0) // unassigned
+	OnGameEvent_player_spawn = function(params)
 	{
-		player.ValidateScriptScope();
-		local scope = player.GetScriptScope();
-		scope.vehicle <- null;
-		scope.vehicle_scope <- null;
-		return;
-	}
-	
-	if (params.team & 2)
-	{
-		// respawned while in a vehicle?
-		local vehicle_scope = player.GetScriptScope().vehicle_scope;
-		if (vehicle_scope)
-			vehicle_scope.Exit(false, false);
+		local player = GetPlayerFromUserID(params.userid);
+		if (!player)
+			return;
 		
-		player.AddEFlags(EFL_IS_BEING_LIFTED_BY_BARNACLE); // prevents game's +use from passing to vehicle
-	}
-}
-
-::Vehicle_OnPlayerDeath <- function(params)
-{
-	local player = GetPlayerFromUserID(params.userid);
-	if (!player)
-		return;
-	if (params.death_flags & 0x20) // dead ringer
-		return;
-		
-	local scope = player.GetScriptScope();
-	if (scope && scope.vehicle_scope)
-		scope.vehicle_scope.Exit(true, true);
-}
-
-::Vehicle_OnPlayerDisconnect <- function(params)
-{
-	local player = GetPlayerFromUserID(params.userid);
-	if (!player)
-		return;
-		
-	local scope = player.GetScriptScope();
-	if (scope && scope.vehicle_scope)
-		scope.vehicle_scope.Exit(true, false);
-}
-
-::Vehicle_OnRoundReset <- function(params)
-{
-	for (local vehicle; vehicle = Entities.FindByClassname(vehicle, "prop_vehicle_driveable");)
-	{
-		local vehicle_scope = vehicle.GetScriptScope();
-		if (vehicle_scope.driver)
-			vehicle_scope.driver.AddEFlags(EFL_KILLME); // prevent player from being deleted
-		vehicle.GetScriptScope().Exit(false, false);
-	}
-}
-
-::Vehicle_OnTakeDamage <- function(params)
-{
-	local victim = params.const_entity;
-	local inflictor = params.inflictor;
-	
-	if (victim.GetClassname() == "prop_vehicle_driveable")
-	{
-		// pass damage to driver
-		local driver = victim.GetScriptScope().driver;
-		if (driver)
+		if (params.team == 0) // unassigned
 		{
-			driver.TakeDamageCustom(
-				params.inflictor, 
-				params.attacker,
-				params.weapon,
-				params.damage_force,
-				params.damage_position, 
-				params.damage,
-				params.damage_type, 
-				params.damage_custom);
+			VehicleInitPlayer(player)
+			return;
+		}
+		
+		if (params.team & 2)
+		{
+			// respawned while in a vehicle?
+			local vehicle_scope = player.GetScriptScope().vehicle_scope;
+			if (vehicle_scope)
+				vehicle_scope.Exit(false, false);
+			
+			player.AddEFlags(EFL_IS_BEING_LIFTED_BY_BARNACLE); // prevents game's +use from passing to vehicle
 		}
 	}
-	else if (inflictor && inflictor.GetClassname() == "prop_vehicle_driveable")
+
+	OnGameEvent_player_death = function(params)
 	{
-		VehicleDmgOwner.SetAbsOrigin(inflictor.GetOrigin());
-		
-		// make driver own the damage
-		params.damage_type = DMG_VEHICLE; // unfortunately this doesn't set the kill icon
-		params.inflictor = VehicleDmgOwner;
-		params.attacker = inflictor.GetScriptScope().driver;
+		local player = GetPlayerFromUserID(params.userid);
+		if (!player)
+			return;
+		if (params.death_flags & 32) // dead ringer
+			return;
+			
+		local scope = player.GetScriptScope();
+		if (scope && scope.vehicle_scope)
+			scope.vehicle_scope.Exit(true, true);
 	}
+
+	OnGameEvent_player_disconnect = function(params)
+	{
+		local player = GetPlayerFromUserID(params.userid);
+		if (!player)
+			return;
+			
+		local scope = player.GetScriptScope();
+		if (scope && scope.vehicle_scope)
+			scope.vehicle_scope.Exit(true, false);
+	}
+
+	OnGameEvent_scorestats_accumulated_update = function(params)
+	{
+		for (local vehicle; vehicle = Entities.FindByClassname(vehicle, "prop_vehicle_driveable");)
+			vehicle.GetScriptScope().Exit(false, false);
+	}
+
+	OnScriptHook_OnTakeDamage = function(params)
+	{
+		local victim = params.const_entity;
+		local inflictor = params.inflictor;
+		
+		if (victim.GetClassname() == "prop_vehicle_driveable")
+		{
+			// pass damage to driver
+			local driver = victim.GetScriptScope().driver;
+			if (driver)
+			{
+				driver.TakeDamageCustom(
+					params.inflictor, 
+					params.attacker,
+					params.weapon,
+					params.damage_force,
+					params.damage_position, 
+					params.damage,
+					params.damage_type, 
+					params.damage_custom);
+			}
+		}
+		else if (inflictor && inflictor.GetClassname() == "prop_vehicle_driveable")
+		{
+			VehicleDmgOwner.SetAbsOrigin(inflictor.GetOrigin());
+			
+			// make driver own the damage
+			params.damage_type = DMG_VEHICLE; // unfortunately this doesn't set the kill icon
+			params.inflictor = VehicleDmgOwner;
+			params.attacker = inflictor.GetScriptScope().driver;
+		}
+	}
+}
+__CollectGameEventCallbacks(VehicleEvents)
+
+for (local player; player = Entities.FindByClassname(player, "player");)
+{
+	local scope = player.GetScriptScope()
+	if (!scope || !("vehicle" in scope))
+		VehicleInitPlayer(player)
 }
