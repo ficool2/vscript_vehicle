@@ -1,6 +1,7 @@
 # VScript Vehicles
 Allows [prop_vehicle_driveable](https://developer.valvesoftware.com/wiki/Prop_vehicle_driveable) entities to function in TF2 via VScript.
-This is *not* func_vehicle!
+
+This is *not* func_vehicle! There is a [separate script](https://github.com/ficool2/vscript_func_vehicle) for that.
 
 # Usage
 Create a `prop_vehicle_driveable` entity and set up its model and vehicle script file as usual.
